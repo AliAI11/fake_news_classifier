@@ -1,0 +1,6 @@
+pandas
+sklearn
+re
+joblib
+string
+streamlit
