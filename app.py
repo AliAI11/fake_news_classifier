@@ -2,12 +2,13 @@ import streamlit as st
 import joblib
 import re
 import string
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
-# Load the vectorizer and model
 vectorizer = joblib.load("vectorizer.jb")
 model = joblib.load("lr_model.jb")
 
-# Define the text cleaning function
 def clean_text(text):
     text = text.lower()
     text = re.sub(r'\[.*?]', "", text)
@@ -19,14 +20,63 @@ def clean_text(text):
     text = re.sub(r"\w*\d\w*", "", text)
     return text
 
-# Define the prediction function (no threshold)
 def predict_news(text, model, vectorizer):
     cleaned_text = clean_text(text)
     vectorized_text = vectorizer.transform([cleaned_text])
     prediction = model.predict(vectorized_text)[0]
     return "Fake" if prediction == 0 else "Real"
 
-# Sample dataset from the user's table (shortened for brevity)
+def extract_text_from_url(url):
+    try:
+        #add http:// prefix if its missing
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            
+        #check URL formatting
+        parsed_url = urlparse(url)
+        if not parsed_url.netloc:
+            return None, "Invalid URL format. Please enter a valid URL."
+            
+        #pretend to be a real browser so we don't get blocked
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return None, f"Failed to retrieve content: Status code {response.status_code}"
+            
+        #parses the HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        #extracts main content fromt the article
+        article = soup.find('article')
+        if article:
+            paragraphs = article.find_all('p')
+        else:
+            #use other key-words to find the main content of the article
+            content_areas = soup.find_all(['main', 'div.content', '#content', '.post-content'])
+            if content_areas:
+                paragraphs = content_areas[0].find_all('p')
+            else:
+                paragraphs = soup.find_all('p')
+        
+        #combine all the text together without extra whitespace
+        text = ' '.join([p.get_text().strip() for p in paragraphs])
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        if not text:
+            return None, "Could not extract text from this URL."
+            
+        #return extracted text
+        return text, None
+        
+    #error handling
+    except requests.exceptions.RequestException as e:
+        return None, f"Error connecting to the website: {str(e)}"
+    except Exception as e:
+        return None, f"An error occurred: {str(e)}"
+
 articles = {
     "Article 1": "a producer at the women in the world event had an awkward moment on thursday night when he was caught in the spotlight while leading hillary clinton onto the stage the backstage producer could be seen with his hand on clinton s back leading her onto the stage and pointing her in which direction to walk to get to her position hillary gingerly walking across the stage to greet samantha bee  who introduced her  letting out a hearty cackle while successfully negotiating the riser moments later  clinton conquered a single step like a pro before taking a seat ummm sorry samantha bee  but we re not seeing the beyonc connection   american mirror",
     "Article 2": "heze  china      first the news rippled across china that millions of compromised vaccines had been given to children around the country  then came grim rumors and angry complaints from parents that the government had kept them in the dark about the risks since last year  now  the country s immunization program faces a backlash of public distrust that critics say has been magnified by the government s ingrained secrecy  song zhendong  like many parents here  said he was reluctant to risk further vaccinations for his    son   if he can avoid them in the future  we will not get them   said mr  song  a businessman   why didn t we learn about this sooner  if there s a problem with vaccines for our kids  we should be told as soon as the police knew  aren t our children the future of the nation   the faulty vaccines have become the latest lightning rod for widespread  often visceral distrust of china s medical system  and a rebuff to what many chinese critics see as president xi jinping s bulldozing    rule  the scandal is just the latest crisis to shake public faith in china s food and medicine supplies  but it is the first big scare under mr  xi  who had vowed to be different  he came into office promising to  make protecting the people s right to health a priority     if our party can t even handle food safety properly while governing china  and this keeps up  some will wonder whether we re up to the job   mr  xi said in   the year he became president  the anger here in heze  the city in the eastern province of shandong where the scandal has its roots  is evident  about two million improperly stored vaccines were sold around the country from an overheated  dilapidated storeroom  the main suspect in the case is a hospital pharmacist from heze who had been convicted of trading in illegal vaccines in  and was doing it again two years later  many parents said they were especially alarmed that nearly a year had elapsed from the time the police uncovered the illicit trade and the time the public first learned about it in february   withholding information doesn t maintain public credibility   said li shuqing  a lawyer in jinan  the capital of shandong province  who is one of about  attorneys who have volunteered to represent possible victims in the case   in the end  it makes people more distrustful    to many here  the combination of lax regulation and the secrecy surrounding a potential public health crisis seems like déjà vu  in the sars crisis of    people died across mainland china and hundreds more died elsewhere after officials hid the extent of its spread  in a scandal that came to light in   at least six children died and    fell ill with kidney stones and other problems from infant formula adulterated with melamine  an industrial chemical   the customers worry about fake milk powder  fake medicine  fake vaccines  fake everything   said ma guohui  the owner of a shop on the rural fringe of heze that sells baby products   this is certainly going to affect people s thinking  my boy got all his vaccination shots  if he were born now  i d worry    despite such fears  the tainted vaccines are more likely to be ineffective than harmful  the world health organization has said that outdated or poorly stored vaccines rarely if ever trigger illness or toxic reactions  chinese government investigators said last week that they had not found any cases of adverse reactions or spikes in infections linked to ineffective vaccines  the greater danger may be more insidious  the erosion of public trust could damage china s immunization program  which has been credited with significant declines in measles and other communicable diseases   confidence is easy to shake  and that s happened across the world and has happened here   said lance rodewald  a doctor with the world health organization s immunization program in beijing   we hear through social media that parents are worried  and we know that when they re worried  there s a very good chance that they may think it s safer not to vaccinate than to vaccinate  that s when trouble can start    after unfounded reports of deaths caused by a hepatitis b vaccine in   such vaccinations across  provinces fell by  percent in the days afterward  and the administration of other mandatory vaccines fell by  percent  according to chinese health officials  the illicit vaccines in the current case were not part of china s compulsory    vaccination program  which inoculates children against illnesses such as polio and measles at no charge  the illegal trade dealt in     vaccines      including those for rabies  influenza and hepatitis b      which patients pay for from their own pockets  the pharmacist named in the investigation  pang hongwei  bought cheap vaccines from drug companies and traders      apparently batches close to their expiration dates      and sold them in  provinces and cities  according to drug safety investigators  she began the business in   just two years after she had been convicted on charges of illegally trading in vaccines and sentenced to three years in prison  which was reduced to five years  probation  officials have not explained how she was able to avoid prison and resume her business  ms  pang  in her late   and her daughter  who has been identified only by her surname  sun  kept the vaccines in a rented storeroom of a disused factory in jinan  the storeroom lacked refrigeration  which may have damaged the vaccines  potency  the police have detained them but not announced specific charges  and neither suspect has had a chance to respond publicly to the accusations  lax regulation in the   commercial system allowed ms  pang s business to grow  several medical experts said  local government medical agencies and clinics were able to increase their profits by turning to cheap  illegal suppliers  people s daily  the official party paper  reported on tuesday  police investigators discovered ms  pang s storehouse last april  but word did not get out to the public until a shandong news website reported on the case in february of this year  most chinese had still heard nothing about it until another website  the paper  published a report that drew national attention a month later  it was the government s intolerance of public criticism  critics said  that kept the scandal under wraps  a delay that now makes it harder to track those who received the suspect injections   we ve seen with these problem vaccines that without the right to know  without press freedom  the public s right to health can t be assured   said wang shengsheng  one of the lawyers pressing the government for more answers and redress over the case  in the last few weeks  official reticence has been supplanted by daily announcements of arrests  checks and assurances as the central government has scrambled to dampen public anger and alarm  premier li keqiang ordered central ministries and agencies in march to investigate what had gone wrong  last week  the investigators reported that  people had been detained over the scandal  and  officials dismissed  demoted or otherwise punished  health and drug officials promised to tighten vaccine purchase rules to stamp out    trade   how could this trafficking in vaccines outside the rules spread to so many places and go on for so long   mr  li said  according to an official account  without decisive action  he said   ordinary people will vote with their feet and go and buy the products they trust    mr  xi has so far not publicly commented on the scandal  dr  rodewald  the world health organization expert  said the proposed changes were promising and would mean clinics would not have to rely on selling   vaccines for their upkeep  xu huijin  a doctor in heze  said that the concern over the scandal      and unfounded rumors of deaths      had depressed the number of parents bringing children to her clinic for inoculations   this was badly handled   she said   there was a lack of coordination  not enough information  we should have found out about this long ago  doctors are taught to tell patients the full facts",
@@ -40,28 +90,61 @@ articles = {
     "Article 10": "lifeline  is a   thriller directed by an academy award winner about a man s search for his missing girlfriend  in the film  set in shanghai with a plot driven by corporate malfeasance  punches are thrown  shots are fired and people are killed  at one point  the actress olivia munn stands over a dead woman  blood on her hands  but this is no ordinary movie  it is an online advertisement for the mobile technology company qualcomm and  in particular  its snapdragon  chip set  a smartphone processor  as more people skip or block ads when streaming shows or browsing websites  advertisers are trying to find new ways to deliver their messages  the internet has long been a place where companies have tried to break out of the   and   ad model  but as it has become easier to present   videos online      and as top directors and actors have shown a willingness to be involved      these efforts have become more sophisticated  the goal of  lifeline  and similar ads is  to make something you want to see      and the holy grail is if people seek you out   said teddy lynn  chief creative officer for content and social at ogilvy  mather  which produced the film   this is a piece of entertainment that can compete in a very crowded marketplace     lifeline  was released in may and pushed out on multiple social media channels in the united states and china   inside lifeline   a      look at the film  is also available on the  lifeline  website  it emphasizes the importance of the cellphone to the action in the film and the phone s various features the film hopes to highlight  like its long battery life and improved photo capability  in many ways   lifeline  is just an extension of product placement and show sponsorship by advertisers that goes back to the early days of radio and television  said lou aversano  chief executive of ogilvy  mather ny   i think we continue to push  not just in terms of length  but in terms of the line between entertainment and brand message   he said  many companies are looking for ways to promote their brand through longer storytelling  such as johnnie walker  nike and prada  it is an impulse that dates to at least  or   when a series of eight   films for bmw starring clive owen appeared online   that was at the time the internet was still   said steve golin  founder and chief executive of anonymous content  a multimedia development company that produced the bmw ads and  lifeline     it would take all night to download     lifeline   which stars ms  munn  leehom wang and joan chen  is directed by armando bo  who won an oscar for best original screenplay for  birdman  in   the film has attracted  million views  there have been an additional  million combined views of the film s trailers and the    video  mr  lynn said  eighty percent of the views came from china  which was the primary market  the dialogue is  percent in chinese and  percent in english  mr  lynn said qualcomm would not disclose the cost of the ad  but noted that with less money needed to buy time on television  more was available for the production   you can create content that is compelling and you don t have to spend money to place it on tv   said mr  golin  whose company has been involved with movies like  spotlight  and  the revenant  and tv shows like  mr  robot     we think this is the direction advertising is headed  as long as sports exists  we will still do   and   commercials  but with most other entertainment there is a lot of resistance to watching    advertising    mark crispin miller  a professor of media studies at new york university  said the disappearing boundaries between advertising and entertainment could be troubling  ads  by their nature  often exaggerate  the benefits or virtues of the products and  even more troubling  downplay the dangers or risk of a product   mr  miller said  and using big stars  makes the commercial intent even harder to perceive and blurs the true purpose behind the work    still  more advertisers are eager to experiment  take  the ballad of the dreadnought   a   documentary about the distinctive guitar body originally manufactured by c  f  martin  company  it is narrated by jeff daniels and includes interviews with musicians like rosanne cash  stephen stills and steve miller  the film appears solely on martin s website  but was selected to appear at several film festivals  it has received    views since it first streamed on may   said scott byers  a managing partner at lehigh mining  navigation  the advertising agency that developed the film  the documentary idea developed  mr  byers said  when martin came to his agency wanting to celebrate the dreadnought guitar  which was developed in the early  century but never trademarked  enabling many other manufacturers to copy it over the years   they asked   what can we do to reclaim ownership of the shape     said denis aumiller  also a managing partner at the agency   the initial thought was that we would produce a short    product video  or maybe a magazine article    as enticing as it may be to think of every commercial as a potential short film that could play on the festival circuit  creating something that attracts viewers and promotes a product is not easy  entertainment  after all  is not the ultimate goal   at some point   mr  aversano said   there s a responsibility to deliver the message of the brand  otherwise it s just empty calories"
 }
 
-# Streamlit app
+# Streamlit App 
 st.set_page_config(page_title="Fake News Detector")
-
 st.title("📰 Fake News Detector")
-st.markdown("Select an article from the dropdown or enter your own news article below to check if it's **Fake** or **Real**.")
+st.markdown("Select an article from the dropdown, paste your own news article, or enter a URL to check if it's **Fake** or **Real**.")
 
-# Dropdown menu for article selection
+#keeps text saved even when page is refreshed using sessionstate
+if 'article_text' not in st.session_state:
+    st.session_state.article_text = ""
+
+#article selection
+st.subheader("Option 1: Article Selection")
 article_options = list(articles.keys())
 selected_article = st.selectbox("Select an Article from the Database:", [""] + article_options)
 
-# Text input area (pre-filled if an article is selected)
-default_text = articles[selected_article] if selected_article else ""
-input_news = st.text_area("News Article:", value=default_text, height=200, placeholder="Paste your news article here...")
+#update session state when article is selected
+if selected_article:
+    st.session_state.article_text = articles[selected_article]
+
+#URL input and fetch
+st.subheader("Option 2: Enter a URL to analyze")
+url_input = st.text_input("Enter news article URL:", placeholder="https://example.com/news-article")
+
+if st.button("Fetch Article from URL"):
+    if url_input:
+        with st.spinner("Extracting text from URL..."):
+            article_text, error = extract_text_from_url(url_input)
+            if article_text:
+                st.session_state.article_text = article_text
+                st.success("Text successfully extracted!")
+            else:
+                st.error(error)
+    else:
+        st.warning("Please enter a URL first.")
+
+#text area with session state
+input_news = st.text_area("News Article:", value=st.session_state.article_text, height=300, placeholder="Paste your news article here...",key="input_news")
+
+#update session state when user types manually
+if input_news != st.session_state.article_text:
+    st.session_state.article_text = input_news
 
 # Check button
 if st.button("Check News"):
-    if input_news.strip():
-        result = predict_news(input_news, model, vectorizer)
-        if result == "Real":
-            st.success("This news is **Real**!")
-        else:
-            st.error("This news is **Fake**!")
+    if st.session_state.article_text.strip():
+        with st.spinner("Analyzing..."):
+            result = predict_news(st.session_state.article_text, model, vectorizer)
+            if result == "Real":
+                st.success("This news is **Real**!")
+            else:
+                st.error("This news is **Fake**!")
     else:
         st.warning("⚠️ Please enter or select a news article to analyze.")
 
+st.sidebar.header("About")
+st.sidebar.info(
+    "This application uses machine learning to detect if a news article is real or fake. "
+    "You can either select a pre-defined article, paste your own text, or enter a URL to analyze."
+)
